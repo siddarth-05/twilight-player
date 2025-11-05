@@ -1,0 +1,1581 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Twilight Player</title>
+    
+    <!-- We're using Tailwind for rapid, beautiful UI development -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Amazon Cognito Identity SDK (for auth) -->
+    <script src="https://unpkg.com/amazon-cognito-identity-js@6.3.1/dist/amazon-cognito-identity.min.js"></script>
+
+    <style>
+        /* Twilight Theme Color Palette */
+        :root {
+            --bg-color: #F3E8FF;      /* Light Lavender */
+            --bg-accent: #FFFFFF;     /* White */
+            --text-color: #37306B;    /* Deep Purple */
+            --text-muted: #66347F;    /* Muted Purple */
+            --primary-color: #FD8D14; /* Warm Orange (Primary) */
+            --primary-hover: #E86A33; /* Darker Orange */
+            --secondary-color: #FDAF7B;/* Peach (Secondary) */
+            --visualizer-color: #FD8D14; /* Orange for visualizer */
+            --danger-color: #dc3545;  /* Red for remove */
+            --danger-hover: #c82333; /* Darker red */
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            transition: background-color 0.3s;
+        }
+
+        /* --- Custom Scrollbar --- */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: var(--bg-accent); }
+        ::-webkit-scrollbar-thumb { background: var(--secondary-color); border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--primary-color); }
+
+        /* --- Page & Animation --- */
+        .page {
+            display: none; /* Hidden by default */
+            animation: fadeIn 0.5s ease-in-out;
+        }
+        .page.active {
+            display: block;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        /* Staggered list animation */
+        .song-item, .playlist-item {
+            animation: slideInUp 0.6s ease-out forwards;
+            opacity: 0;
+            transform: translateY(20px);
+        }
+        /* (NEW) Animation for removing an item */
+        .song-item.removing, .playlist-item.removing {
+            animation: fadeOutLeft 0.5s ease-out forwards;
+        }
+        @keyframes fadeOutLeft {
+            from { opacity: 1; transform: translateX(0); }
+            to { opacity: 0; transform: translateX(-50px); }
+        }
+
+
+        @keyframes slideInUp {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* --- Auth Form Styling --- */
+        .auth-container {
+            display: none; /* (FIX) Hidden by default */
+            animation: popIn 0.3s ease-out;
+            width: 100%; /* (FIX) Ensure container takes width */
+        }
+        .auth-container.active {
+            display: flex; /* (FIX) This now correctly shows the form */
+            flex-direction: column;
+            align-items: center;
+        }
+        
+        @keyframes popIn {
+            from { opacity: 0; transform: scale(0.95); }
+            to { opacity: 1; transform: scale(1.0); }
+        }
+
+        .auth-card {
+            background-color: var(--bg-accent);
+            color: var(--text-color);
+            border-radius: 1.5rem;
+            padding: 2.5rem;
+            box-shadow: 0 10px 25px rgba(55, 48, 107, 0.1);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: 100%;
+        }
+        
+        .auth-input {
+            background-color: var(--bg-color);
+            border: 2px solid var(--secondary-color);
+            color: var(--text-color);
+            border-radius: 0.75rem;
+            padding: 0.75rem 1rem;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+        .auth-input:focus {
+            outline: none;
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 3px var(--secondary-color);
+        }
+        
+        .auth-btn {
+            background-color: var(--primary-color);
+            color: white;
+            font-weight: 600;
+            border-radius: 0.75rem;
+            padding: 0.75rem;
+            transition: background-color 0.2s, transform 0.2s;
+        }
+        .auth-btn:hover {
+            background-color: var(--primary-hover);
+            transform: translateY(-2px);
+        }
+        .auth-link {
+            color: var(--primary-color);
+            font-weight: 500;
+            cursor: pointer;
+            transition: color 0.2s;
+        }
+        .auth-link:hover {
+            color: var(--primary-hover);
+            text-decoration: underline;
+        }
+
+        /* --- Main App UI --- */
+        .sidebar {
+            background-color: var(--bg-accent);
+            box-shadow: 5px 0 15px rgba(55, 48, 107, 0.05);
+        }
+        
+        .nav-link {
+            color: var(--text-muted);
+            transition: all 0.2s ease-in-out;
+            border-left: 4px solid transparent;
+        }
+        .nav-link:hover {
+            color: var(--primary-color);
+            background-color: var(--bg-color);
+        }
+        .nav-link.active {
+            color: var(--primary-color);
+            font-weight: 600;
+            border-left: 4px solid var(--primary-color);
+            background-color: var(--bg-color);
+        }
+
+        /* --- Player Bar --- */
+        .player-bar {
+            background-color: rgba(255, 255, 255, 0.9);
+            backdrop-filter: blur(10px);
+            border-top: 1px solid var(--secondary-color);
+            box-shadow: 0 -5px 15px rgba(55, 48, 107, 0.05);
+        }
+        
+        .play-pause-btn {
+            background-color: var(--primary-color);
+            color: white;
+            transition: all 0.2s ease;
+        }
+        .play-pause-btn:hover {
+            background-color: var(--primary-hover);
+            transform: scale(1.05);
+        }
+
+        #audioVisualizer {
+            width: 100%;
+            height: 50px;
+        }
+        
+        /* --- UI Elements --- */
+        .btn-primary {
+            background-color: var(--primary-color);
+            color: white;
+            font-weight: 600;
+            border-radius: 0.75rem;
+            padding: 0.6rem 1.25rem;
+            transition: all 0.2s ease;
+        }
+        .btn-primary:hover {
+            background-color: var(--primary-hover);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 10px rgba(253, 141, 20, 0.3);
+        }
+
+        .btn-secondary {
+            background-color: var(--bg-color);
+            color: var(--text-muted);
+            font-weight: 600;
+            border-radius: 0.75rem;
+            padding: 0.6rem 1.25rem;
+            transition: all 0.2s ease;
+            border: 2px solid var(--secondary-color);
+        }
+        .btn-secondary:hover {
+            background-color: var(--bg-accent);
+            color: var(--primary-color);
+            border-color: var(--primary-color);
+            transform: translateY(-2px);
+        }
+        
+        .card {
+            background-color: var(--bg-accent);
+            border-radius: 1rem;
+            box-shadow: 0 4px 15px rgba(55, 48, 107, 0.05);
+            transition: all 0.3s ease;
+        }
+        .card:hover {
+             box-shadow: 0 6px 20px rgba(55, 48, 107, 0.1);
+        }
+
+        .form-input {
+            background-color: var(--bg-color);
+            border: 2px solid var(--secondary-color);
+            color: var(--text-color);
+            border-radius: 0.75rem;
+        }
+        .form-input:focus {
+            outline: none;
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 3px var(--secondary-color);
+        }
+
+        /* --- Add to Playlist Modal --- */
+        .modal {
+            display: none; /* Hidden by default */
+            position: fixed;
+            z-index: 1000;
+            left: 0; top: 0;
+            width: 100%; height: 100%;
+            overflow: auto;
+            background-color: rgba(55, 48, 107, 0.4);
+            backdrop-filter: blur(5px);
+            animation: fadeIn 0.3s;
+        }
+        .modal-content {
+            position: relative;
+            margin: 15% auto;
+            padding: 2rem;
+            width: 90%;
+            max-width: 500px;
+        }
+        .modal-close {
+            position: absolute;
+            top: 1rem; right: 1rem;
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: var(--text-muted);
+            cursor: pointer;
+            transition: color 0.2s;
+        }
+        .modal-close:hover {
+            color: var(--primary-color);
+        }
+        .modal-playlist-btn {
+            display: block;
+            width: 100%;
+            text-align: left;
+            padding: 0.75rem;
+            border-radius: 0.5rem;
+            color: var(--text-color);
+            transition: background-color 0.2s;
+        }
+        .modal-playlist-btn:hover {
+            background-color: var(--bg-color);
+        }
+
+        /* Style for playlist list items */
+        .playlist-item-btn { /* This is the clickable card */
+            width: 100%;
+            transition: all 0.3s ease;
+            position: relative; /* For the delete button */
+        }
+        .playlist-item-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(55, 48, 107, 0.1);
+        }
+
+
+        /* --- Add/Remove Song Buttons --- */
+        .add-song-btn {
+            background-color: var(--secondary-color);
+            color: var(--text-color);
+            width: 32px; height: 32px;
+            font-size: 1.2rem;
+            font-weight: bold;
+            border-radius: 50%;
+            transition: all 0.2s ease;
+        }
+        .add-song-btn:hover {
+            background-color: var(--primary-color);
+            color: white;
+            transform: scale(1.1) rotate(90deg);
+        }
+        /* Remove song button */
+        .remove-song-btn {
+            background-color: var(--bg-color);
+            color: var(--danger-color);
+            width: 32px; height: 32px;
+            font-size: 1.5rem;
+            font-weight: bold;
+            border-radius: 50%;
+            transition: all 0.2s ease;
+        }
+        .remove-song-btn:hover {
+            background-color: var(--danger-color);
+            color: white;
+            transform: scale(1.1) rotate(180deg);
+        }
+        /* Delete playlist button */
+        .delete-playlist-btn {
+            position: absolute;
+            top: 0.5rem;
+            right: 0.5rem;
+            background-color: var(--bg-color);
+            color: var(--danger-color);
+            width: 28px; height: 28px;
+            font-size: 1.2rem;
+            font-weight: bold;
+            border-radius: 50%;
+            transition: all 0.2s ease;
+            opacity: 0.5;
+        }
+        .playlist-item:hover .delete-playlist-btn {
+            opacity: 1; /* Show on hover */
+        }
+        .delete-playlist-btn:hover {
+            background-color: var(--danger-color);
+            color: white;
+            transform: scale(1.1);
+            opacity: 1;
+        }
+        
+        /* Toast Notification */
+        #toast {
+            position: fixed;
+            bottom: 100px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 1rem 1.5rem;
+            border-radius: 0.75rem;
+            font-weight: 500;
+            color: white;
+            z-index: 2000;
+            opacity: 0;
+            transition: opacity 0.3s, transform 0.3s;
+            pointer-events: none;
+        }
+        #toast.show {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0);
+        }
+        #toast.success { background-color: #28a745; }
+        #toast.error { background-color: #dc3545; }
+    </style>
+</head>
+<body class="min-h-screen">
+
+    <!-- Global Loading Spinner -->
+    <div id="loadingSpinner" class="fixed inset-0 z-50 flex-col items-center justify-center hidden" style="background-color: rgba(243, 232, 255, 0.7); backdrop-filter: blur(5px);">
+        <div class="w-16 h-16 border-8 border-dashed rounded-full animate-spin" style="border-color: var(--primary-color) transparent var(--primary-color) transparent;"></div>
+        <p class="mt-4 text-lg font-semibold" style="color: var(--text-color);">Loading...</p>
+    </div>
+    
+    <!-- Toast Notification -->
+    <div id="toast">Toast message</div>
+
+    <!-- 
+    ========================================================
+    AUTHENTICATION SCREENS
+    ========================================================
+    -->
+    <div id="authScreens" class="flex items-center justify-center min-h-screen">
+        <div class="w-full max-w-md p-4"> <!-- (FIX) Added padding for mobile -->
+
+            <!-- --- (FIXED) Login Form --- -->
+            <div id="loginForm" class="auth-container"> <!-- (FIX) Typo fixed: class_name -> class -->
+                <div class="auth-card">
+                    <h2 class="text-3xl font-bold text-center mb-2" style="color: var(--text-color);">Welcome Back!</h2>
+                    <p class="text-center mb-6" style="color: var(--text-muted);">Sign in to your account</p>
+                    <div id="loginError" class="text-red-500 text-sm mb-4 text-center"></div>
+                    <form id="login-form" class="space-y-6 w-full"> 
+                        <div>
+                            <label class="block text-sm font-medium mb-2" style="color: var(--text-muted);">Email</label>
+                            <input type="email" id="login-email" class="w-full auth-input" required>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium mb-2" style="color: var(--text-muted);">Password</label>
+                            <input type="password" id="login-password" class="w-full auth-input" required>
+                        </div>
+                        <button type="submit" class="w-full auth-btn !mt-8">Login</button>
+                    </form>
+                    <p class="text-center text-sm mt-6" style="color: var(--text-muted);">
+                        Don't have an account? <span id="showSignup" class="auth-link">Sign up here</span>
+                    </p>
+                </div>
+            </div>
+            
+            <!-- --- (FIXED) Signup Form --- -->
+            <div id="signupForm" class="auth-container"> <!-- (FIX) Corrected structure -->
+                <div class="auth-card">
+                    <h2 class="text-3xl font-bold text-center mb-2" style="color: var(--text-color);">Create Account</h2>
+                    <p class="text-center mb-6" style="color: var(--text-muted);">Join the community</p>
+                    <div id="signupError" class="text-red-500 text-sm mb-4 text-center"></div>
+                    <form id="signup-form" class="space-y-6 w-full"> 
+                        <div>
+                            <label class="block text-sm font-medium mb-2" style="color: var(--text-muted);">Email</label>
+                            <input type="email" id="signup-email" class="w-full auth-input" required>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium mb-2" style="color: var(--text-muted);">Password</label>
+                            <input type="password" id="signup-password" class="w-full auth-input" placeholder="Min. 8 characters, with numbers & symbols" required>
+                        </div>
+                        <button type="submit" class="w-full auth-btn !mt-8">Create Account</button>
+                    </form>
+                    <p class="text-center text-sm mt-6" style="color: var(--text-muted);">
+                        Already have an account? <span id="showLogin" class="auth-link">Login here</span>
+                    </p>
+                </div>
+            </div>
+
+            <!-- --- (FIXED) Verification Form --- -->
+            <div id="verifyForm" class="auth-container"> <!-- (FIX) Corrected structure -->
+                <div class="auth-card">
+                    <h2 class="text-3xl font-bold text-center mb-2" style="color: var(--text-color);">Verify Your Email</h2>
+                    <p class="text-center mb-6" style="color: var(--text-muted);">A 6-digit code was sent to your email.</p>
+                    <div id="verifyError" class="text-red-500 text-sm mb-4 text-center"></div>
+                    <form id="verify-form" class="space-y-6 w-full"> 
+                        <div>
+                            <label class="block text-sm font-medium mb-2" style="color: var(--text-muted);">Verification Code</label>
+                            <input type="text" id="verify-code" class="w-full auth-input text-center tracking-widest text-lg" maxlength="6" required>
+                        </div>
+                        <button type="submit" class="w-full auth-btn !mt-8">Verify Account</button>
+                    </form>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- 
+    ========================================================
+    MAIN APPLICATION UI (Hidden by default)
+    ========================================================
+    -->
+    <div id="appUI" class="hidden">
+        <div class="flex h-screen">
+            <!-- --- Sidebar --- -->
+            <nav class="sidebar w-64 p-6 flex flex-col justify-between">
+                <div>
+                    <h1 class="text-3xl font-bold mb-10" style="color: var(--primary-color);">Twilight</h1>
+                    <ul class="space-y-4">
+                        <li><a href="#library" class="nav-link text-lg font-medium p-3 rounded-lg flex items-center space-x-3 active" data-page="libraryPage"><span>Library</span></a></li>
+                        <li><a href="#playlists" class="nav-link text-lg font-medium p-3 rounded-lg flex items-center space-x-3" data-page="playlistsPage"><span>My Playlists</span></a></li>
+                        <li><a href="#upload" class="nav-link text-lg font-medium p-3 rounded-lg flex items-center space-x-3" data-page="uploadPage"><span>Upload</span></a></li>
+                    </ul>
+                </div>
+                <div class="pb-20"> <!-- Push user info up from player bar -->
+                    <p class="text-sm font-medium" style="color: var(--text-muted);">Logged in as:</p>
+                    <p id="userEmail" class="text-sm font-bold truncate"></p>
+                    <button id="logoutButton" class="w-full text-left mt-4 text-lg font-medium p-3 rounded-lg nav-link flex items-center space-x-3">
+                        <span>Logout</span>
+                    </button>
+                </div>
+            </nav>
+
+            <!-- --- Main Content --- -->
+            <main class="flex-1 p-10 pb-28 overflow-y-auto"> <!-- Padding-bottom to clear player -->
+                
+                <!-- Page: Library -->
+                <div id="libraryPage" class="page active">
+                    <h2 class="text-4xl font-bold mb-8">My Library</h2>
+                    <div id="songList" class="space-y-4">
+                        <!-- Songs will be injected here by JavaScript -->
+                    </div>
+                </div>
+
+                <!-- Page: My Playlists -->
+                <div id="playlistsPage" class="page">
+                    <!-- (NEW) This is the main view -->
+                    <div id="playlistMasterView">
+                        <h2 class="text-4xl font-bold mb-8">My Playlists</h2>
+                        
+                        <!-- Create New Playlist Form -->
+                        <div class="card p-6 mb-8 max-w-lg">
+                            <h3 class="text-2xl font-semibold mb-4">Create New Playlist</h3>
+                            <form id="createPlaylistForm" class="flex space-x-4">
+                                <input type="text" id="playlistNameInput" class="form-input flex-1" placeholder="My New Playlist" required>
+                                <button type="submit" class="btn-primary">Create</button>
+                            </form>
+                        </div>
+
+                        <!-- List of Playlists -->
+                        <div id="playlistList" class="space-y-4">
+                            <!-- Playlists will be injected here -->
+                        </div>
+                    </div>
+
+                    <!-- (NEW) This is the hidden detail view -->
+                    <div id="playlistDetailView" class="hidden">
+                        <button id="backToPlaylists" class="btn-secondary mb-6">
+                            &larr; Back to Playlists
+                        </button>
+                        <h2 id="detailPlaylistName" class="text-4xl font-bold mb-8">...</h2>
+                        <div id="detailPlaylistSongList" class="space-y-4">
+                            <!-- Songs for the selected playlist go here -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Page: Upload -->
+                <div id="uploadPage" class="page">
+                    <h2 class="text-4xl font-bold mb-8">Upload New Song</h2>
+                    <div class="card p-8 max-w-lg">
+                        <form id="upload-form">
+                            <div class="mb-4">
+                                <label class="block text-lg font-medium mb-2">Song Title</label>
+                                <input type="text" name="title" id="upload-title" class="w-full form-input p-3" required>
+                            </div>
+                            <div class="mb-4">
+                                <label class="block text-lg font-medium mb-2">Artist</label>
+                                <input type="text" name="artist" id="upload-artist" class="w-full form-input p-3" required>
+                            </div>
+                            <div class="mb-4">
+                                <label class="block text-lg font-medium mb-2">Audio File (.mp3)</label>
+                                <input type="file" name="mp3_file" id="upload-mp3" class="w-full form-input file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold" style="color: var(--text-muted); file:background-color: var(--secondary-color); file:color: var(--text-color);" accept=".mp3" required>
+                            </div>
+                            <div class="mb-6">
+                                <label class="block text-lg font-medium mb-2">Cover Art (.jpg, .png)</label>
+                                <input type="file" name="image_file" id="upload-image" class="w-full form-input file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold" style="color: var(--text-muted); file:background-color: var(--secondary-color); file:color: var(--text-color);" accept="image/png, image/jpeg" required>
+                            </div>
+                            <button type="submit" class="w-full btn-primary text-lg p-3">Upload Song</button>
+                        </form>
+                    </div>
+                </div>
+            </main>
+        </div>
+
+        <!-- 
+        ========================================================
+        PLAYER BAR
+        ========================================================
+        -->
+        <footer class="player-bar fixed bottom-0 left-0 right-0 h-24 z-40 flex items-center px-6 space-x-6">
+            <!-- Play/Pause Button -->
+            <button id="playPauseButton" class="play-pause-btn w-12 h-12 rounded-full flex items-center justify-center text-2xl shadow-lg">
+                <!-- Play Icon (default) -->
+                <svg id="playIcon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-6 h-6 ml-0.5">
+                    <path fill-rule="evenodd" d="M4.5 5.653c0-1.426 1.529-2.33 2.779-1.643l11.54 6.348c1.295.712 1.295 2.573 0 3.285L7.28 19.99c-1.25.687-2.779-.217-2.779-1.643V5.653z" clip-rule="evenodd" />
+                </svg>
+                <!-- Pause Icon (hidden) -->
+                <svg id="pauseIcon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-6 h-6 hidden">
+                    <path fill-rule="evenodd" d="M6.75 5.25a.75.75 0 01.75-.75H9a.75.75 0 01.75.75v13.5a.75.75 0 01-.75.75H7.5a.75.75 0 01-.75-.75V5.25zm7.5 0a.75.75 0 01.75-.75h1.5a.75.75 0 01.75.75v13.5a.75.75 0 01-.75.75h-1.5a.75.75 0 01-.75-.75V5.25z" clip-rule="evenodd" />
+                </svg>
+            </button>
+            
+            <!-- Now Playing Info -->
+            <div class="flex items-center space-x-3">
+                <img id="playerImage" src="https://placehold.co/64x64/F3E8FF/37306B?text=..." alt="Album Art" class="w-14 h-14 rounded-md shadow-sm">
+                <div>
+                    <p id="playerTitle" class="font-semibold text-sm">Select a song</p>
+                    <p id="playerArtist" class="text-xs" style="color: var(--text-muted);">...</p>
+                </div>
+            </div>
+            
+            <!-- Visualizer & Seek Bar (combined) -->
+            <div class="flex-1 flex items-center h-full">
+                <!-- The canvas for the audio visualizer -->
+                <canvas id="audioVisualizer"></canvas>
+            </div>
+            
+            <!-- Hidden Audio Element -->
+            <audio id="audioPlayer" crossOrigin="anonymous"></audio>
+        </footer>
+    </div>
+    
+    <!-- 
+    ========================================================
+    (NEW) ADD TO PLAYLIST MODAL
+    ========================================================
+    -->
+    <div id="addToPlaylistModal" class="modal">
+        <div class="modal-content card">
+            <span class="modal-close" id="closePlaylistModal">&times;</span>
+            <h3 class="text-2xl font-semibold mb-4">Add to Playlist</h3>
+            <p class="mb-4" style="color: var(--text-muted);">Add "<strong id="modalSongTitle">...</strong>" to:</p>
+            <div id="modalPlaylistList" class="space-y-3 max-h-60 overflow-y-auto">
+                <!-- List of user's playlists will be injected here -->
+            </div>
+        </div>
+    </div>
+
+
+    <!-- 
+    ========================================================
+    JAVASCRIPT
+    ========================================================
+    -->
+    <script type="module">
+        // --- Configuration ---
+        const COGNITO_USER_POOL_ID = 'us-east-1_EqUH81ByT'; // <-- PASTE YOUR Pool Id
+        const COGNITO_APP_CLIENT_ID = '5fprntguvdnhloun9jeqat7cfr'; // <-- PASTE YOUR App client id
+        const API_BASE_URL = 'http://127.0.0.1:5000'; // Flask server
+        
+        // --- State ---
+        let cognitoUser = null;
+        let authToken = null; // This will be our ID Token
+        let globalSongList = []; // Cache for all songs
+        let globalPlaylistList = []; // Cache for user's playlists
+        let isLoggingIn = false; // Flag to prevent auth race condition
+        let currentSongAddToPlaylist = null; // song_id for the modal
+        let currentPlaylistId = null; // (NEW) For playlist detail view
+
+        // --- DOM Elements ---
+        const $ = (selector) => document.querySelector(selector);
+        
+        const authScreens = $('#authScreens');
+        const appUI = $('#appUI');
+        const loadingSpinner = $('#loadingSpinner');
+        const toast = $('#toast');
+        
+        const loginForm = $('#loginForm');
+        const signupForm = $('#signupForm');
+        const verifyForm = $('#verifyForm');
+        
+        const audioPlayer = $('#audioPlayer');
+        const playPauseButton = $('#playPauseButton');
+        const playIcon = $('#playIcon');
+        const pauseIcon = $('#pauseIcon');
+
+        // (NEW) Playlist Modal Elements
+        const playlistModal = $('#addToPlaylistModal');
+        const modalSongTitle = $('#modalSongTitle');
+        const modalPlaylistList = $('#modalPlaylistList');
+        
+        // (NEW) Playlist Detail View Elements
+        const playlistMasterView = $('#playlistMasterView');
+        const playlistDetailView = $('#playlistDetailView');
+        const detailPlaylistName = $('#detailPlaylistName');
+        const detailPlaylistSongList = $('#detailPlaylistSongList');
+
+        // --- AWS Cognito Setup ---
+        const poolData = {
+            UserPoolId: COGNITO_USER_POOL_ID,
+            ClientId: COGNITO_APP_CLIENT_ID,
+        };
+        const userPool = new AmazonCognitoIdentity.CognitoUserPool(poolData);
+
+        // --- Auth Logic ---
+
+        /**
+         * Checks for a valid session on page load.
+         */
+        async function checkAuthStatus() {
+            console.log("Checking auth status...");
+            if (isLoggingIn) {
+                console.log("Login in progress, skipping auth check.");
+                return;
+            }
+            
+            cognitoUser = userPool.getCurrentUser();
+            
+            if (cognitoUser != null) {
+                try {
+                    const session = await getCognitoSession(cognitoUser);
+                    authToken = session.getIdToken().getJwtToken(); // Get ID Token
+                    localStorage.setItem('authToken', authToken); // Store it
+                    
+                    const payload = parseJwt(authToken);
+                    $('#userEmail').textContent = payload.email;
+                    
+                    console.log("Session valid, showing app.");
+                    await showAppUI();
+                } catch (err) {
+                    console.log("Session invalid or expired:", err);
+                    showAuthUI('loginForm');
+                }
+            } else {
+                console.log("No user found.");
+                showAuthUI('loginForm');
+            }
+        }
+        
+        /**
+         * Helper to get session (wraps callback in a Promise).
+         */
+        function getCognitoSession(user) {
+            return new Promise((resolve, reject) => {
+                user.getSession((err, session) => {
+                    if (err) {
+                        reject(err);
+                    } else {
+                        resolve(session);
+                    }
+                });
+            });
+        }
+        
+        /**
+         * Handles the login form submission.
+         */
+        async function handleLogin(e) {
+            e.preventDefault();
+            showLoading("Logging in...");
+            isLoggingIn = true; // Set login flag
+            
+            const email = $('#login-email').value;
+            const password = $('#login-password').value;
+            
+            const authenticationData = { Username: email, Password: password };
+            const authenticationDetails = new AmazonCognitoIdentity.AuthenticationDetails(authenticationData);
+            
+            const userData = { Username: email, Pool: userPool };
+            cognitoUser = new AmazonCognitoIdentity.CognitoUser(userData);
+            
+            cognitoUser.authenticateUser(authenticationDetails, {
+                onSuccess: (session) => {
+                    console.log("Login successful!");
+                    authToken = session.getIdToken().getJwtToken();
+                    localStorage.setItem('authToken', authToken); // Store token
+                    
+                    const payload = parseJwt(authToken);
+                    $('#userEmail').textContent = payload.email;
+
+                    // Directly show the app
+                    showAppUI();
+                    hideLoading();
+                    isLoggingIn = false; // Unset flag
+                },
+                onFailure: (err) => {
+                    console.log("Login failed:", err);
+                    showAuthError('loginError', err.message);
+                    hideLoading();
+                    isLoggingIn = false; // Unset flag
+                },
+            });
+        }
+        
+        /**
+         * Handles the signup form submission.
+         */
+        function handleSignup(e) {
+            e.preventDefault();
+            showLoading("Creating account...");
+            
+            const email = $('#signup-email').value;
+            const password = $('#signup-password').value;
+            
+            const attributeList = [
+                new AmazonCognitoIdentity.CognitoUserAttribute({ Name: 'email', Value: email })
+            ];
+            
+            userPool.signUp(email, password, attributeList, null, (err, result) => {
+                hideLoading();
+                if (err) {
+                    console.log("Signup failed:", err);
+                    showAuthError('signupError', err.message);
+                    return;
+                }
+                cognitoUser = result.user;
+                console.log('Signup success:', cognitoUser.getUsername());
+                showAuthUI('verifyForm'); // Show verification form
+            });
+        }
+
+        /**
+         * Handles the verification form submission.
+         */
+        function handleVerification(e) {
+            e.preventDefault();
+            showLoading("Verifying code...");
+
+            const verificationCode = $('#verify-code').value;
+            const email = $('#signup-email').value; // Get email from signup form
+
+            const userData = { Username: email, Pool: userPool };
+            cognitoUser = new AmazonCognitoIdentity.CognitoUser(userData);
+            
+            cognitoUser.confirmRegistration(verificationCode, true, (err, result) => {
+                hideLoading();
+                if (err) {
+                    console.log("Verification failed:", err);
+                    showAuthError('verifyError', err.message);
+                    return;
+                }
+                console.log('Verification success:', result);
+                showToast("Account verified! Please login.", "success");
+                showAuthUI('loginForm'); // Send to login
+            });
+        }
+        
+        /**
+         * Handles user logout.
+         */
+        function handleLogout() {
+            if (cognitoUser) {
+                cognitoUser.signOut();
+            }
+            localStorage.removeItem('authToken');
+            authToken = null;
+            cognitoUser = null;
+            globalSongList = [];
+            globalPlaylistList = [];
+            
+            // Reset UI
+            $('#songList').innerHTML = '';
+            $('#playlistList').innerHTML = '';
+            
+            showAuthUI('loginForm');
+        }
+
+        // --- UI Switching ---
+        
+        function showAuthUI(formId) {
+            appUI.classList.add('hidden');
+            authScreens.classList.remove('hidden');
+            [loginForm, signupForm, verifyForm].forEach(form => {
+                form.classList.remove('active');
+            });
+            $(`#${formId}`).classList.add('active');
+        }
+        
+        async function showAppUI() {
+            authScreens.classList.add('hidden');
+            appUI.classList.remove('hidden');
+            // Load initial data
+            await fetchSongs();
+            await fetchPlaylists();
+            // Default to library page
+            showPage('libraryPage');
+        }
+        
+        function showAuthError(elementId, message) {
+            const errorEl = $(`#${elementId}`);
+            errorEl.textContent = message;
+        }
+
+        function showPage(pageId) {
+            document.querySelectorAll('.page').forEach(page => page.classList.remove('active'));
+            $(`#${pageId}`).classList.add('active');
+            
+            document.querySelectorAll('.nav-link').forEach(link => link.classList.remove('active'));
+            document.querySelector(`[data-page="${pageId}"]`).classList.add('active');
+            
+            // (NEW) Reset playlist page views
+            if (pageId === 'playlistsPage') {
+                playlistMasterView.classList.remove('hidden');
+                playlistDetailView.classList.add('hidden');
+            }
+        }
+
+        // --- API Calls ---
+
+        /**
+         * Generic fetch wrapper to add auth headers.
+         */
+        async function apiFetch(endpoint, options = {}) {
+            const headers = {
+                'Content-Type': 'application/json',
+                ...options.headers,
+            };
+            
+            if (authToken) {
+                headers['Authorization'] = `Bearer ${authToken}`;
+            }
+            
+            const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+                ...options,
+                headers,
+            });
+            
+            if (!response.ok) {
+                if (response.status === 401) {
+                    // Token expired or invalid
+                    console.error("Auth error, logging out.");
+                    handleLogout();
+                }
+                const errorData = await response.json().catch(() => ({ error: "An unknown error occurred" }));
+                throw new Error(errorData.error);
+            }
+            
+            // (FIX) Check for 204 No Content for DELETE
+            if (response.status === 204 || response.status === 200 && options.method === 'DELETE') {
+                 return null;
+            }
+            return response.json();
+        }
+
+        /**
+         * Fetches all songs from the library.
+         */
+        async function fetchSongs() {
+            console.log("Fetching songs...");
+            try {
+                const songs = await apiFetch('/api/songs');
+                // Filter out songs with invalid URLs
+                const validSongs = songs.filter(song => {
+                    const hasValidUrl = song.s3_url && 
+                                       song.s3_url !== "undefined" && 
+                                       song.s3_url !== "null" && 
+                                       !song.s3_url.includes("undefined");
+                    if (!hasValidUrl) {
+                        console.warn(`Skipping song "${song.title}" - invalid s3_url:`, song.s3_url);
+                    }
+                    return hasValidUrl;
+                });
+                globalSongList = validSongs;
+                renderSongList(validSongs, $('#songList'));
+            } catch (err) {
+                console.error("Failed to fetch songs:", err);
+                showToast(`Error: ${err.message}`, 'error');
+            }
+        }
+        
+        /**
+         * Renders a list of songs into a given container.
+         * (NEW) This is now a generic helper function.
+         */
+        function renderSongList(songs, containerEl) {
+            containerEl.innerHTML = ''; // Clear list
+            if (!songs || songs.length === 0) {
+                containerEl.innerHTML = `<p style="color: var(--text-muted);">This list is empty!</p>`;
+                return;
+            }
+            
+            songs.forEach((song, index) => {
+                const songEl = document.createElement('div');
+                songEl.className = 'song-item card flex items-center justify-between p-4 space-x-4';
+                songEl.style.animationDelay = `${index * 50}ms`; // Stagger animation
+                songEl.dataset.songId = song.song_id; // (NEW) Add for removal
+                
+                // (NEW) Only show the "+" button if we are in the main library
+                const showAddButton = (containerEl.id === 'songList');
+                // (NEW) Only show the "x" button if we are NOT in the main library
+                const showRemoveButton = (containerEl.id === 'detailPlaylistSongList');
+                
+                // (FIX) Add fallback for song image URL
+                const imageUrl = (song.image_url && song.image_url !== "undefined" && song.image_url !== "null") ? song.image_url : 'https://placehold.co/64x64/F3E8FF/37306B?text=...';
+                
+                songEl.innerHTML = `
+                    <div class="flex items-center space-x-4 flex-1">
+                        <img src="${imageUrl}" alt="${song.title}" class="w-14 h-14 rounded-md shadow-sm">
+                        <div class="flex-1">
+                            <p class="font-semibold text-lg">${song.title}</p>
+                            <p class="text-sm" style="color: var(--text-muted);">${song.artist}</p>
+                        </div>
+                    </div>
+                    <div class="flex items-center space-x-4">
+                        ${showAddButton ? `
+                        <button class="add-song-btn flex items-center justify-center" title="Add to playlist" data-song-id="${song.song_id}">
+                            &plus;
+                        </button>
+                        ` : ''}
+                        ${showRemoveButton ? `
+                        <button class="remove-song-btn flex items-center justify-center" title="Remove from playlist" data-song-id="${song.song_id}">
+                            &times;
+                        </button>
+                        ` : ''}
+                        <button class="play-pause-btn w-12 h-12 rounded-full flex items-center justify-center text-2xl shadow-lg" data-song-url="${song.s3_url}" data-song-title="${song.title}" data-song-artist="${song.artist}" data-song-image="${imageUrl}">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-6 h-6 ml-0.5">
+                                <path fill-rule="evenodd" d="M4.5 5.653c0-1.426 1.529-2.33 2.779-1.643l11.54 6.348c1.295.712 1.295 2.573 0 3.285L7.28 19.99c-1.25.687-2.779-.217-2.779-1.643V5.653z" clip-rule="evenodd" />
+                            </svg>
+                        </button>
+                    </div>
+                `;
+                containerEl.appendChild(songEl);
+            });
+        }
+        
+        /**
+         * Fetches user's playlists.
+         */
+        async function fetchPlaylists() {
+            console.log("Fetching playlists...");
+            try {
+                const playlists = await apiFetch('/api/playlists');
+                globalPlaylistList = playlists;
+                renderPlaylistList(playlists);
+            } catch (err) {
+                console.error("Failed to fetch playlists:", err);
+                showToast(`Error: ${err.message}`, 'error');
+            }
+        }
+        
+        /**
+         * Renders the list of playlists.
+         */
+        function renderPlaylistList(playlists) {
+            const playlistListEl = $('#playlistList');
+            playlistListEl.innerHTML = ''; // Clear list
+            if (playlists.length === 0) {
+                playlistListEl.innerHTML = `<p style="color: var(--text-muted);">You haven't created any playlists yet.</p>`;
+                return;
+            }
+            
+            playlists.forEach((playlist, index) => {
+                // (NEW) This is now a div containing the button and delete btn
+                const playlistEl = document.createElement('div');
+                playlistEl.className = 'playlist-item card flex items-center justify-between p-4'; // Reuse animation
+                playlistEl.style.animationDelay = `${index * 50}ms`;
+                playlistEl.dataset.playlistId = playlist.playlist_id; // Set ID for deletion
+                
+                playlistEl.innerHTML = `
+                    <button class="playlist-item-btn flex-1 text-left" data-playlist-id="${playlist.playlist_id}">
+                        <h4 class="text-xl font-semibold">${playlist.name}</h4>
+                        <p class="text-sm" style="color: var(--text-muted);">${playlist.song_ids ? playlist.song_ids.length : 0} songs</p>
+                    </button>
+                    <button class="delete-playlist-btn flex items-center justify-center" title="Delete playlist" data-playlist-id="${playlist.playlist_id}" data-playlist-name="${playlist.name}">
+                        &times;
+                    </button>
+                `;
+                playlistListEl.appendChild(playlistEl);
+            });
+        }
+
+        /**
+         * (NEW) Shows the detail view for a specific playlist.
+         */
+        function showPlaylistDetail(playlistId) {
+            const playlist = globalPlaylistList.find(p => p.playlist_id === playlistId);
+            if (!playlist) return;
+            
+            currentPlaylistId = playlistId; // (NEW) Store this globally
+            
+            // 1. Find all song objects that match the IDs in the playlist
+            const songIds = playlist.song_ids || [];
+            const songsInPlaylist = globalSongList.filter(song => songIds.includes(song.song_id));
+            
+            // 2. Populate the detail view
+            detailPlaylistName.textContent = playlist.name;
+            renderSongList(songsInPlaylist, detailPlaylistSongList); // Render songs into the detail list
+            
+            // 3. Show/Hide the correct views
+            playlistMasterView.classList.add('hidden');
+            playlistDetailView.classList.remove('hidden');
+        }
+        
+        /**
+         * (NEW) Hides the detail view and shows the master list.
+         */
+        function showPlaylistMasterView() {
+            currentPlaylistId = null; // (NEW) Clear this
+            playlistDetailView.classList.add('hidden');
+            playlistMasterView.classList.remove('hidden');
+        }
+        
+        /**
+         * Handles creation of a new playlist.
+         */
+        async function handleCreatePlaylist(e) {
+            e.preventDefault();
+            const playlistName = $('#playlistNameInput').value;
+            if (!playlistName) return;
+            
+            showLoading("Creating playlist...");
+            try {
+                const newPlaylist = await apiFetch('/api/playlists', {
+                    method: 'POST',
+                    body: JSON.stringify({ name: playlistName })
+                });
+                
+                showToast("Playlist created!", "success");
+                $('#playlistNameInput').value = ''; // Clear input
+                globalPlaylistList.push(newPlaylist); // Add to local cache
+                renderPlaylistList(globalPlaylistList); // Re-render
+            } catch (err) {
+                console.error("Failed to create playlist:", err);
+                showToast(`Error: ${err.message}`, 'error');
+            }
+            hideLoading();
+        }
+
+        /**
+         * Handles song upload form.
+         */
+        async function handleUpload(e) {
+            e.preventDefault();
+            showLoading("Uploading song...");
+            
+            const formData = new FormData();
+            formData.append('title', $('#upload-title').value);
+            formData.append('artist', $('#upload-artist').value);
+            formData.append('mp3_file', $('#upload-mp3').files[0]);
+            formData.append('image_file', $('#upload-image').files[0]);
+            
+            try {
+                // We use fetch directly for FormData
+                const response = await fetch(`${API_BASE_URL}/api/upload`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${authToken}`
+                        // Do NOT set 'Content-Type', browser does it for FormData
+                    },
+                    body: formData
+                });
+                
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error);
+                }
+                
+                const newSong = await response.json();
+                
+                showToast("Upload successful!", "success");
+                e.target.reset(); // Reset form
+                
+                // Add to library and switch to it
+                globalSongList.unshift(newSong); // Add to start of list
+                renderSongList(globalSongList, $('#songList'));
+                showPage('libraryPage');
+                
+            } catch (err) {
+                console.error("Upload failed:", err);
+                showToast(`Error: ${err.message}`, 'error');
+            }
+            hideLoading();
+        }
+
+        // --- (NEW) Add to Playlist Logic ---
+
+        /**
+         * Opens the "Add to Playlist" modal.
+         */
+        function showAddToPlaylistModal(songId) {
+            const song = globalSongList.find(s => s.song_id === songId);
+            if (!song) return;
+            
+            currentSongAddToPlaylist = song.song_id;
+            modalSongTitle.textContent = song.title;
+            
+            // Populate the list of playlists
+            modalPlaylistList.innerHTML = '';
+            if (globalPlaylistList.length === 0) {
+                modalPlaylistList.innerHTML = `<p style="color: var(--text-muted);">You have no playlists. Go create one!</p>`;
+            } else {
+                globalPlaylistList.forEach(playlist => {
+                    const pEl = document.createElement('button');
+                    pEl.className = 'modal-playlist-btn'; 
+                    pEl.textContent = playlist.name;
+                    pEl.onclick = () => handleAddToPlaylist(playlist.playlist_id);
+                    modalPlaylistList.appendChild(pEl);
+                });
+            }
+            
+            playlistModal.style.display = 'block';
+        }
+        
+        /**
+         * Hides the "Add to Playlist" modal.
+         */
+        function hideAddToPlaylistModal() {
+            playlistModal.style.display = 'none';
+            currentSongAddToPlaylist = null;
+        }
+        
+        /**
+         * Handles the API call to add the song to the selected playlist.
+         */
+        async function handleAddToPlaylist(playlistId) {
+            if (!currentSongAddToPlaylist || !playlistId) return;
+            
+            showLoading("Adding to playlist...");
+            
+            try {
+                await apiFetch(`/api/playlists/${playlistId}/add`, {
+                    method: 'POST',
+                    body: JSON.stringify({ song_id: currentSongAddToPlaylist })
+                });
+                
+                showToast("Song added to playlist!", "success");
+                hideAddToPlaylistModal();
+                
+                // Refresh playlist data in the background
+                await fetchPlaylists();
+                
+            } catch (err) {
+                console.error("Failed to add to playlist:", err);
+                showToast(`Error: ${err.message}`, 'error');
+            }
+            hideLoading();
+        }
+        
+        /**
+         * (NEW) Handles removing a song from a playlist
+         */
+        async function handleRemoveFromPlaylist(songId) {
+            if (!songId || !currentPlaylistId) return;
+            
+            showLoading("Removing song...");
+            
+            try {
+                // Call the new API endpoint
+                const updatedPlaylist = await apiFetch(`/api/playlists/${currentPlaylistId}/remove`, {
+                    method: 'POST',
+                    body: JSON.stringify({ song_id: songId })
+                });
+
+                showToast("Song removed", "success");
+                
+                // Update local state
+                // 1. Update the playlist in globalPlaylistList
+                const index = globalPlaylistList.findIndex(p => p.playlist_id === currentPlaylistId);
+                if (index !== -1) {
+                    globalPlaylistList[index] = updatedPlaylist;
+                }
+                
+                // 2. Animate and remove the song from the DOM
+                const songEl = $(`#detailPlaylistSongList .song-item[data-song-id="${songId}"]`);
+                if (songEl) {
+                    songEl.classList.add('removing');
+                    setTimeout(() => {
+                        songEl.remove();
+                    }, 500); // Wait for animation
+                }
+                
+                // 3. Update the master playlist list view (for the count)
+                renderPlaylistList(globalPlaylistList);
+
+            } catch (err) {
+                console.error("Failed to remove from playlist:", err);
+                showToast(`Error: ${err.message}`, 'error');
+            }
+            hideLoading();
+        }
+
+        /**
+         * (NEW) Handles deleting an entire playlist
+         */
+        async function handleDeletePlaylist(playlistId, playlistName) {
+            if (!playlistId) return;
+            
+            console.log(`Deleting playlist: ${playlistId}`);
+
+            showLoading("Deleting playlist...");
+            
+            try {
+                await apiFetch(`/api/playlists/${playlistId}`, {
+                    method: 'DELETE'
+                });
+
+                showToast(`Playlist "${playlistName}" deleted`, "success");
+                
+                // Update local state
+                // 1. Remove playlist from cache
+                globalPlaylistList = globalPlaylistList.filter(p => p.playlist_id !== playlistId);
+                
+                // 2. Animate and remove from DOM
+                const playlistEl = $(`#playlistList .playlist-item[data-playlist-id="${playlistId}"]`);
+                if (playlistEl) {
+                    playlistEl.classList.add('removing');
+                    setTimeout(() => {
+                        playlistEl.remove();
+                    }, 500); // Wait for animation
+                }
+
+            } catch (err) {
+                console.error("Failed to delete playlist:", err);
+                showToast(`Error: ${err.message}`, 'error');
+            }
+            hideLoading();
+        }
+
+
+        // --- Player & Visualizer Logic ---
+        
+        // --- Player & Visualizer Logic ---
+        
+        let audioContext, analyser, sourceNode;
+        let isAudioContextInitialized = false;
+        let animationFrameId = null;
+        let currentSongData = null; // NEW: Store current song info
+        const fallbackImageUrl = 'https://placehold.co/64x64/F3E8FF/37306B?text=...';
+
+        function initializeAudioContext() {
+            if (isAudioContextInitialized) return;
+            
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            analyser = audioContext.createAnalyser();
+            analyser.fftSize = 256;
+            
+            sourceNode = audioContext.createMediaElementSource(audioPlayer);
+            sourceNode.connect(analyser);
+            analyser.connect(audioContext.destination);
+            
+            isAudioContextInitialized = true;
+            console.log("AudioContext Initialized and Source Node created.");
+        }
+
+        async function playSong(url, title, artist, image) {
+            try {
+                // Check for invalid URL to prevent 404s
+                if (!url || url === "undefined" || url === "null" || url.includes("undefined")) {
+                    console.error("Invalid song URL:", url);
+                    showToast("Error: This song's audio file is missing.", "error");
+                    return;
+                }
+
+                // Store current song data
+                currentSongData = { url, title, artist, image };
+
+                // Init context on first play
+                if (!isAudioContextInitialized) {
+                    initializeAudioContext();
+                }
+                
+                // Always resume context on a new play
+                if (audioContext.state === 'suspended') {
+                    await audioContext.resume();
+                }
+
+                // Only change src if it's different from current
+                if (audioPlayer.src !== url) {
+                    audioPlayer.src = url;
+                    console.log("Set audio src to:", url);
+                }
+                
+                await audioPlayer.play();
+                console.log("Audio playback started.");
+                
+                // Update player UI
+                $('#playerTitle').textContent = title;
+                $('#playerArtist').textContent = artist;
+                $('#playerImage').src = (image && image !== "undefined" && image !== "null") ? image : fallbackImageUrl;
+                playIcon.classList.add('hidden');
+                pauseIcon.classList.remove('hidden');
+                
+            } catch (err) {
+                if (err.name === 'AbortError') {
+                    console.log("Song play aborted (likely switching songs).");
+                } else {
+                    console.error("Audio play failed:", err);
+                    showToast("Error: Could not play audio.", "error");
+                }
+            }
+        }
+        
+        async function togglePlayPause() {
+            try {
+                // Check if we have a valid current song
+                if (!currentSongData || !currentSongData.url) {
+                    showToast("Please select a song first", "error");
+                    return;
+                }
+                
+                // Resume context if needed
+                if (isAudioContextInitialized && audioContext.state === 'suspended') {
+                    await audioContext.resume();
+                }
+                
+                if (audioPlayer.paused) {
+                    // Make sure the src is still correct before playing
+                    if (!audioPlayer.src || audioPlayer.src.includes("undefined")) {
+                        console.log("Restoring audio src from currentSongData");
+                        audioPlayer.src = currentSongData.url;
+                    }
+                    await audioPlayer.play();
+                    console.log("Resumed playback");
+                } else {
+                    audioPlayer.pause();
+                    console.log("Paused playback");
+                }
+            } catch (err) {
+                 if (err.name === 'AbortError') {
+                    console.log("Toggle play aborted.");
+                 } else if (err.name === 'NotAllowedError') {
+                    console.error("Autoplay was prevented. User may need to interact first.");
+                    showToast("Playback was blocked. Please click again.", "error");
+                 } else {
+                    console.error("Toggle play/pause failed:", err);
+                    showToast("Error: Could not play audio.", "error");
+                }
+            }
+        }
+        
+        audioPlayer.onpause = () => {
+            playIcon.classList.remove('hidden');
+            pauseIcon.classList.add('hidden');
+            if (animationFrameId) {
+                cancelAnimationFrame(animationFrameId);
+                animationFrameId = null;
+            }
+            console.log("Audio paused event fired");
+        };
+        
+        audioPlayer.onplay = async () => {
+            playIcon.classList.add('hidden');
+            pauseIcon.classList.remove('hidden');
+            drawVisualizer();
+            console.log("Audio play event fired");
+        };
+
+        audioPlayer.onerror = (e) => {
+            console.error("Audio element error:", e);
+            console.error("Audio src causing error:", audioPlayer.src);
+            console.error("Audio error code:", audioPlayer.error ? audioPlayer.error.code : "unknown");
+        };
+
+        // --- Visualizer Drawing ---
+        const canvas = $('#audioVisualizer');
+        const canvasCtx = canvas.getContext('2d');
+        const bufferLength = 128;
+        const dataArray = new Uint8Array(bufferLength);
+
+        function drawVisualizer() {
+            try {
+                if (audioPlayer.paused || audioPlayer.ended) {
+                    animationFrameId = null;
+                    canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
+                    return;
+                }
+                
+                animationFrameId = requestAnimationFrame(drawVisualizer);
+                
+                if (!isAudioContextInitialized) return;
+
+                analyser.getByteFrequencyData(dataArray);
+                
+                canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
+                
+                const barWidth = (canvas.width / bufferLength) * 2;
+                let x = 0;
+                
+                for (let i = 0; i < bufferLength; i++) {
+                    const barHeight = (dataArray[i] / 255) * canvas.height * 0.8;
+                    
+                    canvasCtx.fillStyle = `rgb(253, 141, 20)`;
+                    
+                    canvasCtx.fillRect(
+                        x, 
+                        canvas.height - barHeight, 
+                        barWidth, 
+                        barHeight
+                    );
+                    
+                    x += barWidth + 2;
+                }
+            } catch (e) {
+                console.error("Visualizer error:", e);
+                if (animationFrameId) {
+                    cancelAnimationFrame(animationFrameId);
+                }
+                animationFrameId = null;
+            }
+        }
+
+
+        // --- Utility ---
+        
+        function parseJwt(token) {
+            const base64Url = token.split('.')[1];
+            const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+            const jsonPayload = decodeURIComponent(atob(base64).split('').map(c => 
+                '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)
+            ).join(''));
+            return JSON.parse(jsonPayload);
+        }
+
+        function showLoading(message = "Loading...") {
+            $('#loadingSpinner p').textContent = message;
+            loadingSpinner.classList.add('flex');
+            loadingSpinner.classList.remove('hidden');
+        }
+
+        function hideLoading() {
+            loadingSpinner.classList.add('hidden');
+            loadingSpinner.classList.remove('flex');
+        }
+
+        function showToast(message, type = "success") {
+            toast.textContent = message;
+            toast.className = type === "success" ? "success" : "error";
+            toast.classList.add('show');
+            setTimeout(() => {
+                toast.classList.remove('show');
+            }, 3000);
+        }
+
+        // --- Event Listeners ---
+        
+        window.addEventListener('load', checkAuthStatus);
+        
+        // Auth Forms
+        $('#login-form').addEventListener('submit', handleLogin);
+        $('#signup-form').addEventListener('submit', handleSignup);
+        $('#verify-form').addEventListener('submit', handleVerification);
+        $('#showSignup').addEventListener('click', () => showAuthUI('signupForm'));
+        $('#showLogin').addEventListener('click', () => showAuthUI('loginForm'));
+        $('#logoutButton').addEventListener('click', handleLogout);
+
+        // Navigation
+        document.querySelectorAll('.nav-link').forEach(link => {
+            link.addEventListener('click', (e) => {
+                e.preventDefault();
+                showPage(e.currentTarget.dataset.page);
+            });
+        });
+
+        // Player
+        playPauseButton.addEventListener('click', togglePlayPause);
+        
+        // Main Content Listeners (using event delegation)
+        $('#appUI').addEventListener('click', (e) => {
+            // Play button
+            const playButton = e.target.closest('.play-pause-btn');
+            if (playButton) {
+                playSong(
+                    playButton.dataset.songUrl,
+                    playButton.dataset.songTitle,
+                    playButton.dataset.songArtist,
+                    playButton.dataset.songImage
+                );
+                return;
+            }
+            
+            // Add to Playlist button
+            const addButton = e.target.closest('.add-song-btn');
+            if (addButton) {
+                showAddToPlaylistModal(addButton.dataset.songId);
+                return;
+            }
+            
+            // Click on a playlist in the master list
+            const playlistButton = e.target.closest('.playlist-item-btn');
+            if (playlistButton) {
+                showPlaylistDetail(playlistButton.dataset.playlistId);
+                return;
+            }
+            
+            // Click on a remove song button
+            const removeButton = e.target.closest('.remove-song-btn');
+            if (removeButton) {
+                handleRemoveFromPlaylist(removeButton.dataset.songId);
+                return;
+            }
+            
+            // Click on a delete playlist button
+            const deletePlaylistButton = e.target.closest('.delete-playlist-btn');
+            if (deletePlaylistButton) {
+                handleDeletePlaylist(
+                    deletePlaylistButton.dataset.playlistId,
+                    deletePlaylistButton.dataset.playlistName
+                );
+                return;
+            }
+        });
+        
+        // Playlist Page
+        $('#createPlaylistForm').addEventListener('submit', handleCreatePlaylist);
+        $('#backToPlaylists').addEventListener('click', showPlaylistMasterView);
+
+        // Upload Page
+        $('#upload-form').addEventListener('submit', handleUpload);
+
+        // Modal Close Listeners
+        $('#closePlaylistModal').addEventListener('click', hideAddToPlaylistModal);
+        window.addEventListener('click', (e) => {
+            if (e.target == playlistModal) {
+                hideAddToPlaylistModal();
+            }
+        });
+
+    </script>
+</body>
+</html>
